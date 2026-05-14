@@ -26,7 +26,17 @@ import { Type } from "@sinclair/typebox";
 import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
 import { readFileSync, existsSync, readdirSync, mkdirSync, unlinkSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+import { homedir } from "os";
+
+// Global pi agent dir (honors PI_CODING_AGENT_DIR override).
+const PI_AGENT_DIR = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+
+// Package root — used as a bundled fallback for chains/agents so that
+// `pi -e git:<this-repo>` works out of the box without any local config.
+const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
 import { applyExtensionDefaults } from "./themeMap.ts";
 
 // ── Types ────────────────────────────────────────
@@ -164,6 +174,9 @@ function scanAgentDirs(cwd: string): Map<string, AgentDef> {
 		join(cwd, "agents"),
 		join(cwd, ".claude", "agents"),
 		join(cwd, ".pi", "agents"),
+		join(PI_AGENT_DIR, "agents"),
+		// Bundled fallback for `pi -e git:...` installs
+		join(PACKAGE_ROOT, ".pi", "agents"),
 	];
 
 	const agents = new Map<string, AgentDef>();
@@ -188,6 +201,12 @@ function scanAgentDirs(cwd: string): Map<string, AgentDef> {
 // ── Extension ────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+	pi.registerFlag("chain", {
+		description: "Enable agent-chain pipeline orchestrator",
+		type: "boolean",
+		default: false,
+	});
+
 	let allAgents: Map<string, AgentDef> = new Map();
 	let chains: ChainDef[] = [];
 	let activeChain: ChainDef | null = null;
@@ -213,8 +232,14 @@ export default function (pi: ExtensionAPI) {
 			agentSessions.set(key, existsSync(sessionFile) ? sessionFile : null);
 		}
 
-		const chainPath = join(cwd, ".pi", "agents", "agent-chain.yaml");
-		if (existsSync(chainPath)) {
+		const chainCandidates = [
+			join(cwd, ".pi", "agents", "agent-chain.yaml"),
+			join(PI_AGENT_DIR, "agents", "agent-chain.yaml"),
+			// Bundled fallback for `pi -e git:...` installs
+			join(PACKAGE_ROOT, ".pi", "agents", "agent-chain.yaml"),
+		];
+		const chainPath = chainCandidates.find((p) => existsSync(p));
+		if (chainPath) {
 			try {
 				chains = parseChainYaml(readFileSync(chainPath, "utf-8"));
 			} catch {
@@ -724,6 +749,9 @@ ${agentCatalog}
 	// ── Session Start ───────────────────────────
 
 	pi.on("session_start", async (_event, _ctx) => {
+		// Dormant unless --chain flag is set
+		if (!pi.getFlag("chain")) return;
+
 		applyExtensionDefaults(import.meta.url, _ctx);
 		// Clear widget with both old and new ctx — one of them will be valid
 		if (widgetCtx) {

@@ -3,7 +3,22 @@
   "private": true,
   "type": "module",
   "description": "Pi Coding Agent extension playground",
+  "keywords": ["pi-package"],
   "dependencies": {
     "yaml": "^2.8.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/*.ts",
+      "!extensions/themeMap.ts"
+    ],
+    "skills": [".pi/skills"],
+    "themes": [".pi/themes"]
   }
 }
