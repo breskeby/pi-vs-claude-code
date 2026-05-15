@@ -30,10 +30,17 @@ else
 fi
 echo "✓ Fetched"
 
-# ── 3. Install the package into global pi settings ───────────────────────
-echo "→ Installing agent-chain..."
+# ── 3. Copy agents + chain config to ~/.pi/agent/agents/ ─────────────────
+echo "→ Installing agents and chain config..."
+AGENT_DIR="${HOME}/.pi/agent/agents"
+mkdir -p "$AGENT_DIR"
+cp "$CLONE_DIR/$SUBDIR/.pi/agents/"* "$AGENT_DIR/"
+echo "✓ Agents and chains installed to ${AGENT_DIR}"
+
+# ── 4. Register the extension in global pi settings ──────────────────────
+echo "→ Registering extension..."
 pi install "$CLONE_DIR/$SUBDIR"
-echo "✓ agent-chain installed"
+echo "✓ Extension registered"
 
 echo ""
 echo "All done. Run: pi"
