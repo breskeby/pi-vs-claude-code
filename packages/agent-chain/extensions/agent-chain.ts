@@ -204,7 +204,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerFlag("chain", {
 		description: "Enable agent-chain pipeline orchestrator",
 		type: "boolean",
-		default: false,
+		default: true,
 	});
 
 	let allAgents: Map<string, AgentDef> = new Map();
