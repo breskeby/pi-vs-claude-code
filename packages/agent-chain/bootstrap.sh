@@ -23,7 +23,7 @@ fi
 echo "→ Fetching agent-chain package..."
 git clone --depth 1 --filter=blob:none --sparse "$REPO" "$CLONE_DIR" -q
 cd "$CLONE_DIR"
-git sparse-checkout set "$SUBDIR" -q
+git sparse-checkout set "$SUBDIR"
 echo "✓ Fetched"
 
 # ── 3. Install the package into global pi settings ───────────────────────
