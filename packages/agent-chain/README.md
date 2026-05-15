@@ -29,7 +29,7 @@ Only the agents referenced by `agent-chain.yaml` are bundled: `planner`,
 ### One-liner (installs pi + this package)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/packages/agent-chain/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/breskeby/pi-vs-claude-code/main/packages/agent-chain/bootstrap.sh | bash
 ```
 
 Or locally:
@@ -38,19 +38,13 @@ Or locally:
 bash packages/agent-chain/bootstrap.sh
 ```
 
-### From npm (pi already installed)
-
-```bash
-pi install npm:pi-agent-chain            # global
-pi install -l npm:pi-agent-chain         # project only
-```
+The script does a sparse-clone of just `packages/agent-chain/` from the repo and
+runs `pi install` against that local path — no npm publish required.
 
 ### Try it once without installing
 
 ```bash
 pi -e ./packages/agent-chain
-# or from npm without permanent install:
-pi -e npm:pi-agent-chain
 ```
 
 ### From a local path

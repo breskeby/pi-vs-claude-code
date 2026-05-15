@@ -211,12 +211,12 @@ Unlike the dynamic dispatcher, `agent-chain` acts as a sequential pipeline orche
 
 ```bash
 # One-liner bootstrap (installs pi + the package):
-curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/packages/agent-chain/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/breskeby/pi-vs-claude-code/main/packages/agent-chain/bootstrap.sh | bash
 
 # Or, if pi is already installed:
-pi install npm:pi-agent-chain          # global
-pi install -l npm:pi-agent-chain       # project only
-pi -e npm:pi-agent-chain               # try without installing
+pi install ./packages/agent-chain      # global, from local path
+pi install -l ./packages/agent-chain   # project only
+pi -e ./packages/agent-chain           # try without installing
 ```
 
 Publishing recipes:
