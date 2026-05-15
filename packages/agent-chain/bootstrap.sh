@@ -8,7 +8,7 @@ set -euo pipefail
 
 REPO="https://github.com/breskeby/pi-vs-claude-code.git"
 SUBDIR="packages/agent-chain"
-CLONE_DIR="$(mktemp -d)/pi-agent-chain"
+CLONE_DIR="${HOME}/.pi/agent-chain-pkg"
 
 # ── 1. Install pi ─────────────────────────────────────────────────────────
 if command -v pi &>/dev/null; then
@@ -19,11 +19,15 @@ else
   echo "✓ pi installed"
 fi
 
-# ── 2. Sparse-clone only packages/agent-chain ────────────────────────────
+# ── 2. Sparse-clone (or update) only packages/agent-chain ───────────────
 echo "→ Fetching agent-chain package..."
-git clone --depth 1 --filter=blob:none --sparse "$REPO" "$CLONE_DIR" -q
-cd "$CLONE_DIR"
-git sparse-checkout set "$SUBDIR"
+if [[ -d "$CLONE_DIR/.git" ]]; then
+  echo "  (updating existing clone)"
+  git -C "$CLONE_DIR" pull -q
+else
+  git clone --depth 1 --filter=blob:none --sparse "$REPO" "$CLONE_DIR"
+  git -C "$CLONE_DIR" sparse-checkout set "$SUBDIR"
+fi
 echo "✓ Fetched"
 
 # ── 3. Install the package into global pi settings ───────────────────────
