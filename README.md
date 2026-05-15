@@ -133,11 +133,17 @@ just ext-tilldone           # Task discipline system with live progress tracking
 just ext-agent-team         # Multi-agent orchestration grid dashboard
 just ext-system-select      # Agent persona switcher via /system command
 just ext-damage-control     # Safety auditing + minimal footer
-just ext-agent-chain        # Sequential pipeline orchestrator with step chaining
-just ext-pi-pi              # Meta-agent that builds Pi agents using parallel experts
-just ext-session-replay     # Scrollable timeline overlay of session history
-just ext-theme-cycler       # Theme cycler + minimal footer
-just all                    # Open every extension in its own terminal window
+just ext-agent-chain                 # Sequential pipeline orchestrator with step chaining
+just ext-pi-pi                       # Meta-agent that builds Pi agents using parallel experts
+just ext-session-replay              # Scrollable timeline overlay of session history
+just ext-theme-cycler                # Theme cycler + minimal footer
+just all                             # Open every extension in its own terminal window
+
+# agent-chain standalone distribution
+just bootstrap-agent-chain           # Try the standalone package without installing
+just bootstrap-agent-chain-install   # Install into current project (.pi/settings.json)
+just publish-agent-chain-dry         # Dry-run npm publish
+just publish-agent-chain             # Publish packages/agent-chain to npm
 ```
 
 The `open` recipe allows you to spin up a new terminal window with any combination of stacked extensions (omit `.ts`):
@@ -153,6 +159,12 @@ just open purpose-gate minimal tool-counter-widget
 ```
 pi-vs-cc/
 ├── extensions/          # Pi extension source files (.ts) — one file per extension
+├── packages/
+│   └── agent-chain/     # Standalone, publishable agent-chain pi package
+│       ├── extensions/  # agent-chain.ts + themeMap stub
+│       ├── .pi/agents/  # Bundled chain config + agent personas
+│       ├── bootstrap.sh # One-liner: installs pi + the package
+│       └── package.json # pi-package manifest (publishable to npm)
 ├── specs/               # Feature specifications for extensions
 ├── .pi/
 │   ├── agent-sessions/  # Ephemeral session files (gitignored)
@@ -193,6 +205,25 @@ Unlike the dynamic dispatcher, `agent-chain` acts as a sequential pipeline orche
 - Workflows are defined as a list of `steps`, where each step specifies an `agent` and a `prompt`. 
 - The `$INPUT` variable injects the previous step's output (or the user's initial prompt for the first step), and `$ORIGINAL` always contains the user's initial prompt.
 - Example: The `plan-build-review` pipeline feeds your prompt to the `planner`, passes the plan to the `builder`, and finally sends the code to the `reviewer`.
+
+#### Standalone distribution
+`packages/agent-chain/` is a self-contained pi package that ships only the agent-chain extension, its five agent personas, and the chain config — no other extensions, no themes.
+
+```bash
+# One-liner bootstrap (installs pi + the package):
+curl -fsSL https://raw.githubusercontent.com/<user>/<repo>/main/packages/agent-chain/bootstrap.sh | bash
+
+# Or, if pi is already installed:
+pi install npm:pi-agent-chain          # global
+pi install -l npm:pi-agent-chain       # project only
+pi -e npm:pi-agent-chain               # try without installing
+```
+
+Publishing recipes:
+```bash
+just publish-agent-chain-dry   # npm publish --dry-run
+just publish-agent-chain       # npm publish --access public
+```
 
 ---
 

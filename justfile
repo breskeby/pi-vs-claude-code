@@ -59,6 +59,26 @@ ext-damage-control:
 ext-agent-chain:
     pi -e extensions/agent-chain.ts -e extensions/theme-cycler.ts
 
+# Bootstrap: try the standalone agent-chain distribution (no install)
+bootstrap-agent-chain:
+    pi -e ./packages/agent-chain
+
+# Bootstrap: install the standalone agent-chain distribution into this project
+bootstrap-agent-chain-install:
+    pi install -l ./packages/agent-chain
+
+# Bootstrap: install the standalone agent-chain distribution globally
+bootstrap-agent-chain-install-global:
+    pi install ./packages/agent-chain
+
+# Publish agent-chain to npm (dry-run first)
+publish-agent-chain-dry:
+    cd packages/agent-chain && npm publish --dry-run
+
+# Publish agent-chain to npm
+publish-agent-chain:
+    cd packages/agent-chain && npm publish --access public
+
 #g3
 
 # 14. Pi Pi: meta-agent that builds Pi agents with parallel expert research

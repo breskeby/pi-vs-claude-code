@@ -1,0 +1,19 @@
+{
+  "name": "pi-agent-chain",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Standalone pi distribution: agent-chain extension + custom agents + chain config",
+  "keywords": ["pi-package"],
+  "dependencies": {
+    "yaml": "^2.8.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": ["extensions/agent-chain.ts"]
+  }
+}
