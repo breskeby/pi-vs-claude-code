@@ -1,0 +1,20 @@
+{
+  "name": "pi-system-select",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Switch the active system prompt via /system command",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/system-select.ts"
+    ]
+  }
+}

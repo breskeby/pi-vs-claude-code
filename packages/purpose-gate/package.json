@@ -1,0 +1,20 @@
+{
+  "name": "pi-purpose-gate",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Force intent declaration before working \u2014 persistent purpose widget",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/purpose-gate.ts"
+    ]
+  }
+}

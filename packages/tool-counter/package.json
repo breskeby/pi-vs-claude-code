@@ -1,0 +1,20 @@
+{
+  "name": "pi-tool-counter",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Rich two-line footer with model, context, token/cost stats and per-tool tally",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/tool-counter.ts"
+    ]
+  }
+}

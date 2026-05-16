@@ -14,6 +14,18 @@
  * Agents maintain session context within a Pi session — re-running the
  * chain lets each agent resume where it left off.
  *
+ * Agent definition format (.pi/agents/<name>.md):
+ *   ---
+ *   name: my-agent
+ *   description: What this agent does
+ *   tools: read,bash,edit,write,grep,find,ls
+ *   prompt-mode: append   # append (default) | replace
+ *   ---
+ *   <system prompt body>
+ *
+ *   prompt-mode: append  — appends body to pi's default coding assistant prompt
+ *   prompt-mode: replace — uses body as the sole system prompt (full control)
+ *
  * Commands:
  *   /chain             — switch active chain
  *   /chain-list        — list all available chains
@@ -56,6 +68,7 @@ interface AgentDef {
 	name: string;
 	description: string;
 	tools: string;
+	promptMode: "append" | "replace";
 	systemPrompt: string;
 }
 
@@ -158,10 +171,12 @@ function parseAgentFile(filePath: string): AgentDef | null {
 
 		if (!frontmatter.name) return null;
 
+		const rawMode = (frontmatter["prompt-mode"] || "append").toLowerCase();
 		return {
 			name: frontmatter.name,
 			description: frontmatter.description || "",
 			tools: frontmatter.tools || "read,grep,find,ls",
+			promptMode: rawMode === "replace" ? "replace" : "append",
 			systemPrompt: match[2].trim(),
 		};
 	} catch {
@@ -374,7 +389,8 @@ export default function (pi: ExtensionAPI) {
 			"--model", model,
 			"--tools", agentDef.tools,
 			"--thinking", "off",
-			"--append-system-prompt", agentDef.systemPrompt,
+			agentDef.promptMode === "replace" ? "--system-prompt" : "--append-system-prompt",
+		agentDef.systemPrompt,
 			"--session", agentSessionFile,
 		];
 

@@ -1,0 +1,23 @@
+{
+  "name": "pi-damage-control",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Real-time safety auditing \u2014 intercept dangerous bash patterns and enforce path-based access controls",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/damage-control.ts"
+    ]
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  }
+}

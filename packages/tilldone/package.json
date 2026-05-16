@@ -1,0 +1,20 @@
+{
+  "name": "pi-tilldone",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Task discipline system \u2014 define tasks before starting, track completion",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/tilldone.ts"
+    ]
+  }
+}

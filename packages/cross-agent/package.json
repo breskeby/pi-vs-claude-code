@@ -1,0 +1,20 @@
+{
+  "name": "pi-cross-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Load commands, skills, and agents from Claude, Gemini, and Codex agent directories",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/cross-agent.ts"
+    ]
+  }
+}

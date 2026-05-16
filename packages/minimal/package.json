@@ -1,0 +1,20 @@
+{
+  "name": "pi-minimal",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Compact footer showing model name and a 10-block context usage meter",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/minimal.ts"
+    ]
+  }
+}

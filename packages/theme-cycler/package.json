@@ -1,0 +1,20 @@
+{
+  "name": "pi-theme-cycler",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Keyboard shortcuts and /theme command to cycle through installed themes",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/theme-cycler.ts"
+    ]
+  }
+}

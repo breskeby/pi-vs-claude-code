@@ -1,0 +1,20 @@
+{
+  "name": "pi-subagent-widget",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Spawn background Pi subagents with live-streaming progress widgets",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/subagent-widget.ts"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "pi-tool-counter-widget",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Live-updating above-editor widget showing per-tool call counts",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/tool-counter-widget.ts"
+    ]
+  }
+}

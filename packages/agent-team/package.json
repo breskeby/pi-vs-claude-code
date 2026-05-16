@@ -1,0 +1,20 @@
+{
+  "name": "pi-agent-team",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dispatcher-only orchestrator: delegate all work to specialist agents via a grid dashboard",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/agent-team.ts"
+    ]
+  }
+}

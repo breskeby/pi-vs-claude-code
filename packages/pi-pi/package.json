@@ -1,0 +1,20 @@
+{
+  "name": "pi-pi-pi",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Meta-agent that builds Pi extensions using parallel domain-expert research",
+  "keywords": [
+    "pi-package"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/pi-pi.ts"
+    ]
+  }
+}
