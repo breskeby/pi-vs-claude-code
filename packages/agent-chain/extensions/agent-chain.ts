@@ -20,24 +20,36 @@
  *   description: What this agent does
  *   tools: read,bash,edit,write,grep,find,ls
  *   prompt-mode: append   # append (default) | replace
+ *   model: openrouter/google/gemini-3-flash-preview  # optional override
  *   ---
  *   <system prompt body>
  *
  *   prompt-mode: append  — appends body to pi's default coding assistant prompt
  *   prompt-mode: replace — uses body as the sole system prompt (full control)
  *
+ * Chain YAML step format (.pi/agents/agent-chain.yaml):
+ *   chain-name:
+ *     description: "What this chain does"
+ *     steps:
+ *       - agent: my-agent
+ *         model: openrouter/google/gemini-3-flash-preview  # optional override
+ *         prompt: "Do $INPUT"
+ *
+ * Model resolution order (per step): step model → agent model → ctx.model → default
+ *
  * Commands:
  *   /chain             — switch active chain
  *   /chain-list        — list all available chains
+ *   /chain-inspect     — drill into step details and token usage
  *
  * Usage: pi -e extensions/agent-chain.ts
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth, visibleWidth, matchesKey, Key } from "@mariozechner/pi-tui";
 import { spawn } from "child_process";
-import { readFileSync, existsSync, readdirSync, mkdirSync, unlinkSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, unlinkSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
@@ -56,6 +68,7 @@ import { applyExtensionDefaults } from "./themeMap.ts";
 interface ChainStep {
 	agent: string;
 	prompt: string;
+	model?: string;
 }
 
 interface ChainDef {
@@ -70,6 +83,15 @@ interface AgentDef {
 	tools: string;
 	promptMode: "append" | "replace";
 	systemPrompt: string;
+	model?: string;
+}
+
+interface TokenUsage {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
 }
 
 interface StepState {
@@ -77,12 +99,22 @@ interface StepState {
 	status: "pending" | "running" | "done" | "error";
 	elapsed: number;
 	lastWork: string;
+	tokens?: TokenUsage;
+	output?: string;
+	resolvedPrompt?: string;
+	model?: string;
 }
 
 // ── Display Name Helper ──────────────────────────
 
 function displayName(name: string): string {
 	return name.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// ── Number format helper ─────────────────────────
+
+function fmtNum(n: number): string {
+	return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n);
 }
 
 // ── Chain YAML Parser ────────────────────────────
@@ -132,6 +164,13 @@ function parseChainYaml(raw: string): ChainDef[] {
 			continue;
 		}
 
+		// Step model line (optional, per-step override)
+		const stepModelMatch = line.match(/^\s+model:\s+(.+)$/);
+		if (stepModelMatch && currentStep) {
+			currentStep.model = stepModelMatch[1].trim();
+			continue;
+		}
+
 		// Step prompt line
 		const promptMatch = line.match(/^\s+prompt:\s+(.+)$/);
 		if (promptMatch && currentStep) {
@@ -178,6 +217,7 @@ function parseAgentFile(filePath: string): AgentDef | null {
 			tools: frontmatter.tools || "read,grep,find,ls",
 			promptMode: rawMode === "replace" ? "replace" : "append",
 			systemPrompt: match[2].trim(),
+			model: frontmatter.model || undefined,
 		};
 	} catch {
 		return null;
@@ -213,9 +253,167 @@ function scanAgentDirs(cwd: string): Map<string, AgentDef> {
 	return agents;
 }
 
+// ── Audit Trail Writer ───────────────────────────
+
+function writeAuditTrace(
+	sessionDir: string,
+	chainName: string,
+	task: string,
+	totalElapsed: number,
+	success: boolean,
+	steps: ChainStep[],
+	states: StepState[],
+	format: string = "md",
+): void {
+	try {
+		const traceFile = join(sessionDir, `chain-run-${Date.now()}.md`);
+
+		// Aggregate totals across all steps
+		let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheWrite = 0, totalCost = 0;
+		for (const s of states) {
+			if (s.tokens) {
+				totalInput     += s.tokens.input;
+				totalOutput    += s.tokens.output;
+				totalCacheRead += s.tokens.cacheRead;
+				totalCacheWrite+= s.tokens.cacheWrite;
+				totalCost      += s.tokens.cost;
+			}
+		}
+		const anyTokens = states.some(s => !!s.tokens);
+
+		const lines: string[] = [
+			`# Chain Run: ${chainName}`,
+			``,
+			`| Field   | Value |`,
+			`|---------|-------|`,
+			`| **Task**    | ${task.replace(/\n/g, " ").slice(0, 120)}${task.length > 120 ? "…" : ""} |`,
+			`| **Status**  | ${success ? "✅ success" : "❌ error"} |`,
+			`| **Elapsed** | ${Math.round(totalElapsed / 1000)}s |`,
+		];
+
+		if (anyTokens) {
+			lines.push(
+				``,
+				`## Token Usage Summary`,
+				``,
+				`| Agent | Model | Input | Output | Cache Read | Cache Write | Cost |`,
+				`|-------|-------|------:|-------:|-----------:|------------:|-----:|`,
+			);
+			for (let i = 0; i < states.length; i++) {
+				const s = states[i];
+				const modelCol = s.model || "—";
+				if (s.tokens) {
+					lines.push(
+						`| ${displayName(s.agent)} | \`${modelCol}\` | ${s.tokens.input.toLocaleString()} | ${s.tokens.output.toLocaleString()} | ${s.tokens.cacheRead.toLocaleString()} | ${s.tokens.cacheWrite.toLocaleString()} | $${s.tokens.cost.toFixed(5)} |`
+					);
+				} else {
+					lines.push(
+						`| ${displayName(s.agent)} | \`${modelCol}\` | — | — | — | — | — |`
+					);
+				}
+			}
+			lines.push(
+				`| **Total** | | **${totalInput.toLocaleString()}** | **${totalOutput.toLocaleString()}** | **${totalCacheRead.toLocaleString()}** | **${totalCacheWrite.toLocaleString()}** | **$${totalCost.toFixed(5)}** |`,
+			);
+		}
+
+		lines.push(``, `## Steps`);
+
+		for (let i = 0; i < states.length; i++) {
+			const s = states[i];
+			const step = steps[i];
+			lines.push(
+				``,
+				`### Step ${i + 1}: ${displayName(s.agent)}`,
+				``,
+				`| Field | Value |`,
+				`|-------|-------|`,
+				`| **Status**  | ${s.status} |`,
+				`| **Model**   | \`${s.model || "—"}\` |`,
+				`| **Elapsed** | ${Math.round(s.elapsed / 1000)}s |`,
+			);
+			if (s.tokens) {
+				const t = s.tokens;
+				lines.push(
+					`| **Input tokens**       | ${t.input.toLocaleString()} |`,
+					`| **Output tokens**      | ${t.output.toLocaleString()} |`,
+					`| **Cache read tokens**  | ${t.cacheRead.toLocaleString()} |`,
+					`| **Cache write tokens** | ${t.cacheWrite.toLocaleString()} |`,
+					`| **Total tokens**       | ${t.totalTokens.toLocaleString()} |`,
+					`| **Cost**               | $${t.cost.toFixed(5)} |`,
+				);
+			}
+			lines.push(
+				``,
+				`**Input prompt:**`,
+				``,
+				`\`\`\``,
+				`${s.resolvedPrompt || step.prompt}`,
+				`\`\`\``,
+				``,
+				`**Output:**`,
+				``,
+				`\`\`\``,
+				`${s.output || "(none)"}`,
+				`\`\`\``,
+			);
+		}
+
+		const ts = Date.now();
+		const base = join(sessionDir, `chain-run-${ts}`);
+
+		if (format === "md" || format === "both") {
+			writeFileSync(`${base}.md`, lines.join("\n"));
+		}
+
+		if (format === "json" || format === "both") {
+			const json = {
+				chain: chainName,
+				task,
+				status: success ? "success" : "error",
+				elapsedMs: totalElapsed,
+				timestamp: new Date(ts).toISOString(),
+				tokens: anyTokens ? {
+					input: totalInput,
+					output: totalOutput,
+					cacheRead: totalCacheRead,
+					cacheWrite: totalCacheWrite,
+					cost: totalCost,
+				} : null,
+				steps: states.map((s, i) => ({
+					index: i + 1,
+					agent: s.agent,
+					model: s.model ?? null,
+					status: s.status,
+					elapsedMs: s.elapsed,
+					tokens: s.tokens ? {
+						input: s.tokens.input,
+						output: s.tokens.output,
+						cacheRead: s.tokens.cacheRead,
+						cacheWrite: s.tokens.cacheWrite,
+						totalTokens: s.tokens.totalTokens,
+						cost: s.tokens.cost,
+					} : null,
+					prompt: s.resolvedPrompt ?? steps[i]?.prompt ?? null,
+					output: s.output ?? null,
+				})),
+			};
+			writeFileSync(`${base}.json`, JSON.stringify(json, null, 2));
+		}
+	} catch {
+		// Audit failure must not surface to user
+	}
+}
+
 // ── Extension ────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+	pi.registerFlag("chain-trace-format", {
+		description: "Format for chain run trace files written to .pi/agent-sessions/. Accepted values: md, json, both (default: md)",
+		type: "string",
+		default: "md",
+	});
+
 	pi.registerFlag("chain", {
 		description: "Enable agent-chain pipeline orchestrator",
 		type: "boolean",
@@ -306,6 +504,17 @@ export default function (pi: ExtensionAPI) {
 		const workLine = workText ? theme.fg("muted", workText) : theme.fg("dim", "—");
 		const workVisible = workText ? workText.length : 1;
 
+		// Token line — shown if available, placeholder "—" otherwise (keeps card height constant)
+		let tokenText = "—";
+		let tokenVisible = 1;
+		if (state.tokens) {
+			tokenText = `↑${fmtNum(state.tokens.input)} ↓${fmtNum(state.tokens.output)} 💰$${state.tokens.cost.toFixed(3)}`;
+			tokenVisible = tokenText.length;
+			tokenText = theme.fg("muted", tokenText);
+		} else {
+			tokenText = theme.fg("dim", tokenText);
+		}
+
 		const top = "┌" + "─".repeat(w) + "┐";
 		const bot = "└" + "─".repeat(w) + "┘";
 		const border = (content: string, visLen: number) =>
@@ -316,6 +525,7 @@ export default function (pi: ExtensionAPI) {
 			border(" " + nameStr, 1 + nameVisible),
 			border(" " + statusLine, 1 + statusVisible),
 			border(" " + workLine, 1 + workVisible),
+			border(" " + tokenText, 1 + tokenVisible),
 			theme.fg("dim", bot),
 		];
 	}
@@ -337,10 +547,10 @@ export default function (pi: ExtensionAPI) {
 					const cols = stepStates.length;
 					const totalArrowWidth = arrowWidth * (cols - 1);
 					const colWidth = Math.max(12, Math.floor((width - totalArrowWidth) / cols));
-					const arrowRow = 2; // middle of 5-line card (0-indexed)
+					const cardHeight = 6; // 6-line card (top + name + status + work + tokens + bot)
+					const arrowRow = Math.floor(cardHeight / 2); // middle row
 
 					const cards = stepStates.map(s => renderCard(s, colWidth, theme));
-					const cardHeight = cards[0].length;
 					const outputLines: string[] = [];
 
 					for (let line = 0; line < cardHeight; line++) {
@@ -373,10 +583,13 @@ export default function (pi: ExtensionAPI) {
 		task: string,
 		stepIndex: number,
 		ctx: any,
-	): Promise<{ output: string; exitCode: number; elapsed: number }> {
-		const model = ctx.model
+		stepDef: ChainStep,
+	): Promise<{ output: string; exitCode: number; elapsed: number; tokens?: TokenUsage }> {
+		// Model resolution: step model → agent model → ctx.model → default
+		const ctxModel = ctx.model
 			? `${ctx.model.provider}/${ctx.model.id}`
 			: "openrouter/google/gemini-3-flash-preview";
+		const model = stepDef.model || agentDef.model || ctxModel;
 
 		const agentKey = agentDef.name.toLowerCase().replace(/\s+/g, "-");
 		const agentSessionFile = join(sessionDir, `chain-${agentKey}.json`);
@@ -403,6 +616,8 @@ export default function (pi: ExtensionAPI) {
 		const textChunks: string[] = [];
 		const startTime = Date.now();
 		const state = stepStates[stepIndex];
+		state.model = model;
+		let lastTokens: TokenUsage | undefined;
 
 		return new Promise((resolve) => {
 			const proc = spawn("pi", args, {
@@ -417,6 +632,30 @@ export default function (pi: ExtensionAPI) {
 
 			let buffer = "";
 
+			function processEvent(event: any) {
+				if (event.type === "message_update") {
+					const delta = event.assistantMessageEvent;
+					if (delta?.type === "text_delta") {
+						textChunks.push(delta.delta || "");
+						const full = textChunks.join("");
+						const last = full.split("\n").filter((l: string) => l.trim()).pop() || "";
+						state.lastWork = last;
+						updateWidget();
+					}
+				} else if (event.type === "message" && event.message?.usage) {
+					const u = event.message.usage;
+					lastTokens = {
+						input: u.input ?? 0,
+						output: u.output ?? 0,
+						cacheRead: u.cacheRead ?? 0,
+						cacheWrite: u.cacheWrite ?? 0,
+						cost: u.cost?.total ?? 0,
+					};
+					state.tokens = lastTokens;
+					updateWidget();
+				}
+			}
+
 			proc.stdout!.setEncoding("utf-8");
 			proc.stdout!.on("data", (chunk: string) => {
 				buffer += chunk;
@@ -425,17 +664,7 @@ export default function (pi: ExtensionAPI) {
 				for (const line of lines) {
 					if (!line.trim()) continue;
 					try {
-						const event = JSON.parse(line);
-						if (event.type === "message_update") {
-							const delta = event.assistantMessageEvent;
-							if (delta?.type === "text_delta") {
-								textChunks.push(delta.delta || "");
-								const full = textChunks.join("");
-								const last = full.split("\n").filter((l: string) => l.trim()).pop() || "";
-								state.lastWork = last;
-								updateWidget();
-							}
-						}
+						processEvent(JSON.parse(line));
 					} catch {}
 				}
 			});
@@ -446,11 +675,7 @@ export default function (pi: ExtensionAPI) {
 			proc.on("close", (code) => {
 				if (buffer.trim()) {
 					try {
-						const event = JSON.parse(buffer);
-						if (event.type === "message_update") {
-							const delta = event.assistantMessageEvent;
-							if (delta?.type === "text_delta") textChunks.push(delta.delta || "");
-						}
+						processEvent(JSON.parse(buffer));
 					} catch {}
 				}
 
@@ -464,7 +689,7 @@ export default function (pi: ExtensionAPI) {
 					agentSessions.set(agentKey, agentSessionFile);
 				}
 
-				resolve({ output, exitCode: code ?? 1, elapsed });
+				resolve({ output, exitCode: code ?? 1, elapsed, tokens: lastTokens });
 			});
 
 			proc.on("error", (err) => {
@@ -473,6 +698,7 @@ export default function (pi: ExtensionAPI) {
 					output: `Error spawning agent: ${err.message}`,
 					exitCode: 1,
 					elapsed: Date.now() - startTime,
+					tokens: lastTokens,
 				});
 			});
 		});
@@ -484,11 +710,13 @@ export default function (pi: ExtensionAPI) {
 		task: string,
 		ctx: any,
 	): Promise<{ output: string; success: boolean; elapsed: number }> {
+		const traceFormat = String(pi.getFlag("chain-trace-format") ?? "md");
 		if (!activeChain) {
 			return { output: "No chain active", success: false, elapsed: 0 };
 		}
 
 		const chainStart = Date.now();
+		let success = false;
 
 		// Reset all steps to pending
 		stepStates = activeChain.steps.map(s => ({
@@ -501,47 +729,254 @@ export default function (pi: ExtensionAPI) {
 
 		let input = task;
 		const originalPrompt = task;
+		let finalOutput = "";
 
-		for (let i = 0; i < activeChain.steps.length; i++) {
-			const step = activeChain.steps[i];
-			stepStates[i].status = "running";
-			updateWidget();
-
-			const resolvedPrompt = step.prompt
-				.replace(/\$INPUT/g, input)
-				.replace(/\$ORIGINAL/g, originalPrompt);
-
-			const agentDef = allAgents.get(step.agent.toLowerCase());
-			if (!agentDef) {
-				stepStates[i].status = "error";
-				stepStates[i].lastWork = `Agent "${step.agent}" not found`;
+		try {
+			for (let i = 0; i < activeChain.steps.length; i++) {
+				const step = activeChain.steps[i];
+				stepStates[i].status = "running";
 				updateWidget();
-				return {
-					output: `Error at step ${i + 1}: Agent "${step.agent}" not found. Available: ${Array.from(allAgents.keys()).join(", ")}`,
-					success: false,
-					elapsed: Date.now() - chainStart,
-				};
+
+				const resolvedPrompt = step.prompt
+					.replace(/\$INPUT/g, input)
+					.replace(/\$ORIGINAL/g, originalPrompt);
+
+				// Store resolved prompt for audit trail
+				stepStates[i].resolvedPrompt = resolvedPrompt;
+
+				const agentDef = allAgents.get(step.agent.toLowerCase());
+				if (!agentDef) {
+					stepStates[i].status = "error";
+					stepStates[i].lastWork = `Agent "${step.agent}" not found`;
+					updateWidget();
+
+					const totalElapsed = Date.now() - chainStart;
+					writeAuditTrace(sessionDir, activeChain.name, task, totalElapsed, false, activeChain.steps, stepStates, traceFormat);
+
+					return {
+						output: `Error at step ${i + 1}: Agent "${step.agent}" not found. Available: ${Array.from(allAgents.keys()).join(", ")}`,
+						success: false,
+						elapsed: totalElapsed,
+					};
+				}
+
+				const result = await runAgent(agentDef, resolvedPrompt, i, ctx, step);
+
+				// Persist output in step state for audit and drill-down
+				stepStates[i].output = result.output;
+				if (result.tokens) {
+					stepStates[i].tokens = result.tokens;
+				}
+				// model is already set on state inside runAgent, but ensure it's reflected
+				if (!stepStates[i].model) {
+					const ctxModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "openrouter/google/gemini-3-flash-preview";
+					stepStates[i].model = step.model || allAgents.get(step.agent.toLowerCase())?.model || ctxModel;
+				}
+
+				if (result.exitCode !== 0) {
+					stepStates[i].status = "error";
+					updateWidget();
+
+					const totalElapsed = Date.now() - chainStart;
+					writeAuditTrace(sessionDir, activeChain.name, task, totalElapsed, false, activeChain.steps, stepStates, traceFormat);
+
+					return {
+						output: `Error at step ${i + 1} (${step.agent}): ${result.output}`,
+						success: false,
+						elapsed: totalElapsed,
+					};
+				}
+
+				stepStates[i].status = "done";
+				updateWidget();
+
+				input = result.output;
+				finalOutput = input;
 			}
 
-			const result = await runAgent(agentDef, resolvedPrompt, i, ctx);
-
-			if (result.exitCode !== 0) {
-				stepStates[i].status = "error";
-				updateWidget();
-				return {
-					output: `Error at step ${i + 1} (${step.agent}): ${result.output}`,
-					success: false,
-					elapsed: Date.now() - chainStart,
-				};
+			success = true;
+			return { output: finalOutput, success: true, elapsed: Date.now() - chainStart };
+		} finally {
+			const totalElapsed = Date.now() - chainStart;
+			if (activeChain) {
+				writeAuditTrace(sessionDir, activeChain.name, task, totalElapsed, success, activeChain.steps, stepStates, traceFormat);
 			}
+		}
+	}
 
-			stepStates[i].status = "done";
-			updateWidget();
+	// ── Drill-down overlay ──────────────────────
 
-			input = result.output;
+	async function showChainInspect(ctx: any): Promise<void> {
+		if (!activeChain || stepStates.length === 0) {
+			ctx.ui.notify("No chain run yet — run the chain first", "info");
+			return;
 		}
 
-		return { output: input, success: true, elapsed: Date.now() - chainStart };
+		// Step selector overlay
+		const selectedIndex = await ctx.ui.custom<number | null>(
+			(_tui: any, theme: any, _keybindings: any, done: (v: number | null) => void) => {
+				let cursor = 0;
+				let cachedLines: string[] | undefined;
+				let cachedWidth: number | undefined;
+
+				return {
+					render(width: number): string[] {
+						if (cachedLines && cachedWidth === width) return cachedLines;
+						cachedWidth = width;
+
+						const lines: string[] = [
+							truncateToWidth(theme.fg("accent", theme.bold(" Chain Steps — select to inspect")), width),
+							truncateToWidth(theme.fg("dim", " ↑/↓ navigate · Enter select · Esc close"), width),
+							truncateToWidth(theme.fg("dim", "─".repeat(width)), width),
+						];
+
+						for (let i = 0; i < stepStates.length; i++) {
+							const s = stepStates[i];
+							const isSelected = i === cursor;
+							const prefix = isSelected ? "▶ " : "  ";
+							const statusIcon = s.status === "pending" ? "○"
+								: s.status === "running" ? "●"
+								: s.status === "done" ? "✓" : "✗";
+							const statusColor = s.status === "pending" ? "dim"
+								: s.status === "running" ? "accent"
+								: s.status === "done" ? "success" : "error";
+							const tokenInfo = s.tokens
+								? theme.fg("dim", ` ↑${fmtNum(s.tokens.input)} ↓${fmtNum(s.tokens.output)} $${s.tokens.cost.toFixed(3)}`)
+								: "";
+							const label = (isSelected ? theme.fg("accent", theme.bold(prefix)) : theme.fg("dim", prefix)) +
+								theme.fg(statusColor, `${statusIcon} ${i + 1}. ${displayName(s.agent)}`) +
+								tokenInfo;
+							lines.push(truncateToWidth(label, width));
+						}
+
+						cachedLines = lines;
+						return lines;
+					},
+					handleInput(data: string) {
+						cachedLines = undefined;
+						if (matchesKey(data, Key.up)) {
+							cursor = Math.max(0, cursor - 1);
+						} else if (matchesKey(data, Key.down)) {
+							cursor = Math.min(stepStates.length - 1, cursor + 1);
+						} else if (matchesKey(data, Key.enter)) {
+							done(cursor);
+						} else if (matchesKey(data, Key.escape)) {
+							done(null);
+						}
+					},
+					invalidate() {
+						cachedLines = undefined;
+					},
+				};
+			},
+			{
+				overlay: true,
+				overlayOptions: { width: "60%", minWidth: 50, anchor: "center" as const },
+			},
+		);
+
+		if (selectedIndex === null) return;
+
+		const state = stepStates[selectedIndex];
+
+		// Detail overlay for the selected step
+		await ctx.ui.custom<void>(
+			(_tui: any, theme: any, _keybindings: any, done: (v: void) => void) => {
+				const lines: string[] = [];
+
+				// Build detail lines
+				lines.push(theme.bold(` Step ${selectedIndex + 1}: ${displayName(state.agent)}`));
+				lines.push(theme.fg("dim", "─".repeat(60)));
+
+				const statusIcon = state.status === "pending" ? "○"
+					: state.status === "running" ? "●"
+					: state.status === "done" ? "✓" : "✗";
+				const statusColor = state.status === "pending" ? "dim"
+					: state.status === "running" ? "accent"
+					: state.status === "done" ? "success" : "error";
+				lines.push(` Status: ${theme.fg(statusColor, `${statusIcon} ${state.status}`)}  Elapsed: ${Math.round(state.elapsed / 1000)}s`);
+
+				if (state.tokens) {
+					const t = state.tokens;
+					lines.push(
+						` Tokens: ${theme.fg("accent", `↑${fmtNum(t.input)} in`)} ` +
+						`${theme.fg("muted", `↓${fmtNum(t.output)} out`)} ` +
+						`cache-r:${fmtNum(t.cacheRead)} cache-w:${fmtNum(t.cacheWrite)} ` +
+						`${theme.fg("success", `💰$${t.cost.toFixed(4)}`)}`
+					);
+				} else {
+					lines.push(theme.fg("dim", " Tokens: —"));
+				}
+
+				lines.push(theme.fg("dim", "─".repeat(60)));
+				lines.push(theme.fg("muted", " Prompt:"));
+				const promptText = state.resolvedPrompt || "(not yet run)";
+				for (const l of promptText.split("\n").slice(0, 10)) {
+					lines.push(`   ${l}`);
+				}
+
+				lines.push(theme.fg("dim", "─".repeat(60)));
+				lines.push(theme.fg("muted", " Output:"));
+				const outputText = state.output || "(none)";
+				const outputLines = outputText.split("\n");
+				let scrollOffset = 0;
+				const maxVisible = 20;
+
+				// Pre-build all output lines, scroll handled in render
+				const allOutputLines = outputLines.map(l => `   ${l}`);
+
+				let cachedLines: string[] | undefined;
+				let cachedWidth: number | undefined;
+
+				return {
+					render(width: number): string[] {
+						if (cachedLines && cachedWidth === width) return cachedLines;
+						cachedWidth = width;
+
+						const result: string[] = [
+							truncateToWidth(theme.fg("dim", " ↑/↓ scroll output · Esc close"), width),
+						];
+
+						for (const l of lines) {
+							result.push(truncateToWidth(l, width));
+						}
+
+						// Scrollable output section
+						const visibleOutput = allOutputLines.slice(scrollOffset, scrollOffset + maxVisible);
+						for (const l of visibleOutput) {
+							result.push(truncateToWidth(theme.fg("muted", l), width));
+						}
+
+						if (allOutputLines.length > maxVisible) {
+							result.push(truncateToWidth(
+								theme.fg("dim", ` [${scrollOffset + 1}–${Math.min(scrollOffset + maxVisible, allOutputLines.length)}/${allOutputLines.length} lines]`),
+								width
+							));
+						}
+
+						cachedLines = result;
+						return result;
+					},
+					handleInput(data: string) {
+						cachedLines = undefined;
+						if (matchesKey(data, Key.up)) {
+							scrollOffset = Math.max(0, scrollOffset - 1);
+						} else if (matchesKey(data, Key.down)) {
+							scrollOffset = Math.min(Math.max(0, allOutputLines.length - maxVisible), scrollOffset + 1);
+						} else if (matchesKey(data, Key.escape)) {
+							done(undefined);
+						}
+					},
+					invalidate() {
+						cachedLines = undefined;
+					},
+				};
+			},
+			{
+				overlay: true,
+				overlayOptions: { width: "70%", minWidth: 60, maxHeight: "80%", anchor: "center" as const },
+			},
+		);
 	}
 
 	// ── run_chain Tool ──────────────────────────
@@ -555,6 +990,13 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, _signal, onUpdate, ctx) {
+			if (!pi.getFlag("chain")) {
+				return {
+					content: [{ type: "text", text: "Agent chain is disabled (--chain=false)" }],
+					details: {},
+				};
+			}
+
 			const { task } = params as { task: string };
 
 			if (onUpdate) {
@@ -634,6 +1076,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("chain", {
 		description: "Switch active chain",
 		handler: async (_args, ctx) => {
+			if (!pi.getFlag("chain")) {
+				ctx.ui.notify("Agent chain is disabled", "warning");
+				return;
+			}
 			widgetCtx = ctx;
 			if (chains.length === 0) {
 				ctx.ui.notify("No chains defined in .pi/agents/agent-chain.yaml", "warning");
@@ -663,6 +1109,10 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("chain-list", {
 		description: "List all available chains",
 		handler: async (_args, ctx) => {
+			if (!pi.getFlag("chain")) {
+				ctx.ui.notify("Agent chain is disabled", "warning");
+				return;
+			}
 			widgetCtx = ctx;
 			if (chains.length === 0) {
 				ctx.ui.notify("No chains defined in .pi/agents/agent-chain.yaml", "warning");
@@ -678,6 +1128,18 @@ export default function (pi: ExtensionAPI) {
 			}).join("\n\n");
 
 			ctx.ui.notify(list, "info");
+		},
+	});
+
+	pi.registerCommand("chain-inspect", {
+		description: "Drill into a chain step to see full output and token details",
+		handler: async (_args, ctx) => {
+			if (!pi.getFlag("chain")) {
+				ctx.ui.notify("Agent chain is disabled", "warning");
+				return;
+			}
+			widgetCtx = ctx;
+			await showChainInspect(ctx);
 		},
 	});
 
@@ -809,7 +1271,8 @@ ${agentCatalog}
 		_ctx.ui.notify(
 			`Chain: ${activeChain!.name}\n${activeChain!.description}\n${flow}\n\n` +
 			`/chain             Switch chain\n` +
-			`/chain-list        List all chains`,
+			`/chain-list        List all chains\n` +
+			`/chain-inspect     Drill into step details`,
 			"info",
 		);
 

@@ -8,6 +8,18 @@ plan-build-review:
     - agent: reviewer
       prompt: "Review this implementation for bugs, style, and correctness:\n\n$INPUT"
 
+plan-build-review-fix:
+  description: "Plan, implement, review, then fix the review findings — closes the loop"
+  steps:
+    - agent: planner
+      prompt: "Plan the implementation for: $INPUT"
+    - agent: builder
+      prompt: "Implement the following plan:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Review this implementation for bugs, style, and correctness. Format your findings as a numbered list of concrete, actionable items the builder can apply. Mark each as [BUG], [REGRESSION], [STYLE], or [NIT]:\n\n$INPUT"
+    - agent: builder
+      prompt: "Apply fixes for every [BUG] and [REGRESSION] finding below. Apply [STYLE] findings if they are quick. Skip [NIT]s unless trivial. After fixing, re-run the verification command and confirm it passes.\n\nOriginal request: $ORIGINAL\n\nReview findings:\n$INPUT"
+
 plan-build:
   description: "Plan then build — fast two-step implementation without review"
   steps:
@@ -47,3 +59,5 @@ full-review:
       prompt: "Implement this plan:\n\n$INPUT"
     - agent: reviewer
       prompt: "Review this implementation:\n\n$INPUT"
+    - agent: builder
+      prompt: "Apply fixes for every [BUG] and [REGRESSION] finding below. Apply [STYLE] findings if they are quick. Skip [NIT]s unless trivial. After fixing, re-run the verification command and confirm it passes.\n\nOriginal request: $ORIGINAL\n\nReview findings:\n$INPUT"
